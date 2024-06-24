@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Encrypted Chat</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #chat { height: 400px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+        #message { width: calc(100% - 80px); }
+        #send { width: 70px; }
+    </style>
+</head>
+<body>
+    <h1>Encrypted Chat</h1>
+    <div id="chat"></div>
+    <input type="text" id="message" placeholder="Type your message here...">
+    <button id="send">Send</button>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        async function encryptMessage(message, publicKey) {
+            const enc = new TextEncoder();
+            const encoded = enc.encode(message);
+            return window.crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, encoded);
+        }
+
+        async function decryptMessage(encrypted, privateKey) {
+            return window.crypto.subtle.decrypt({ name: "RSA-OAEP" }, privateKey, encrypted)
+                .then((decrypted) => {
+                    const dec = new TextDecoder();
+                    return dec.decode(decrypted);
+                });
+        }
+
+        let publicKey, privateKey;
+
+        async function generateKeys() {
+            const keyPair = await window.crypto.subtle.generateKey(
+                {
+                    name: "RSA-OAEP",
+                    modulusLength: 2048,
+                    publicExponent: new Uint8Array([1, 0, 1]),
+                    hash: "SHA-256"
+                },
+                true,
+                ["encrypt", "decrypt"]
+            );
+            publicKey = keyPair.publicKey;
+            privateKey = keyPair.privateKey;
+            socket.emit('publicKey', await window.crypto.subtle.exportKey('spki', publicKey));
+        }
+
+        generateKeys();
+
+        document.getElementById('send').addEventListener('click', async () => {
+            const message = document.getElementById('message').value;
+            const encrypted = await encryptMessage(message, publicKey);
+            socket.emit('chat message', encrypted);
+            document.getElementById('message').value = '';
+        });
+
+        socket.on('chat message', async (encryptedMessage) => {
+            const decryptedMessage = await decryptMessage(encryptedMessage, privateKey);
+            const chat = document.getElementById('chat');
+            const messageElement = document.createElement('div');
+            messageElement.textContent = decryptedMessage;
+            chat.appendChild(messageElement);
+        });
+    </script>
+</body>
+</html>
